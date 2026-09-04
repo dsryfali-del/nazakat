@@ -4,7 +4,7 @@ import { AuthOnboarding } from '@/components/AuthOnboarding';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 import { NAV_TABS, type TabId } from '@/components/nav';
-import { ComingSoon } from '@/components/ui';
+import { LiveAnalysisPage } from '@/pages/LiveAnalysisPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { StrategiesPage } from '@/pages/StrategiesPage';
 import { RiskCenterPage } from '@/pages/RiskCenterPage';
@@ -17,10 +17,6 @@ import { PropFirmPage } from '@/pages/PropFirmPage';
 import { LiveAccountPage } from '@/pages/LiveAccountPage';
 import { StocksPage } from '@/pages/StocksPage';
 import { PerformancePage } from '@/pages/PerformancePage';
-
-const SOON_DESC: Record<string, { title: string; description: string }> = {
-  analysis: { title: 'Live Analysis', description: 'Real-time multi-timeframe confluence scoring and live signal streaming are on the roadmap.' },
-};
 
 function Shell() {
   const { session } = useApp();
@@ -38,7 +34,7 @@ function Shell() {
         <main className="flex-1 p-5 lg:p-6 max-w-[1500px] w-full mx-auto">
           {tab === 'dashboard' && <DashboardPage onNavigate={navigate} />}
           {tab === 'markets' && <MarketsPage />}
-          {tab === 'analysis' && <Soon id="analysis" />}
+          {tab === 'analysis' && <LiveAnalysisPage />}
           {tab === 'charts' && <ChartsPage />}
           {tab === 'strategies' && <StrategiesPage />}
           {tab === 'backtest' && <BacktestPage />}
@@ -53,11 +49,6 @@ function Shell() {
       </div>
     </div>
   );
-}
-
-function Soon({ id }: { id: string }) {
-  const def = SOON_DESC[id];
-  return <ComingSoon title={def.title} description={def.description} />;
 }
 
 export default function App() {

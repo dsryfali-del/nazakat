@@ -1,4 +1,4 @@
-import { TrendingDown, TrendingUp, Wallet, Percent } from 'lucide-react';
+import { TrendingDown, TrendingUp, Wallet, Percent, AlertTriangle } from 'lucide-react';
 import { useApp } from '@/state/AppContext';
 import { ACCOUNT_LABEL, MODE_LABEL } from '@/lib/labels';
 import { fmtPct, fmtPctPlain, fmtUsd } from '@/lib/format';
@@ -6,9 +6,13 @@ import { StatusPill } from './ui';
 
 // Persistent header: account badge, status pill, equity, drawdown, today's P/L.
 export function Header() {
-  const { session, riskInputs, risk } = useApp();
+  const { session, riskInputs, risk, correlationWarnings } = useApp();
   const todayPnl = riskInputs.todayPnl;
   const up = todayPnl >= 0;
+  const hasCorrelationRisk = correlationWarnings.length > 0;
+  const correlationTooltip = correlationWarnings
+    .map((w) => `${w.cluster.name} ${w.direction}: ${w.combinedRiskPct.toFixed(2)}% (${w.severity})`)
+    .join('\n');
 
   return (
     <header className="h-16 sticky top-0 z-20 bg-terminal-900/95 backdrop-blur border-b border-terminal-700/70 flex items-center px-5 gap-5">
@@ -21,7 +25,18 @@ export function Header() {
         </span>
       </div>
 
-      <div className="hidden md:block"><StatusPill status={risk.status} /></div>
+      <div className="hidden md:flex items-center gap-2">
+        {hasCorrelationRisk && (
+          <span
+            className="pill border bg-warn-500/15 text-warn-400 border-warn-500/30 cursor-help"
+            title={correlationTooltip}
+          >
+            <AlertTriangle className="w-3 h-3" />
+            Correlation risk
+          </span>
+        )}
+        <StatusPill status={risk.status} />
+      </div>
 
       <div className="flex-1" />
 

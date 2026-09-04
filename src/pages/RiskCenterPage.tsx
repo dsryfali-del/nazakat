@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Calculator, ShieldCheck, Gauge, Ban } from 'lucide-react';
+import { Calculator, ShieldCheck, Gauge, Ban, Layers, Plus, X, AlertTriangle } from 'lucide-react';
 import { useApp } from '@/state/AppContext';
 import { computeRisk, positionSize, RECOMMENDED_RISK } from '@/lib/risk';
 import { fmtPctPlain, fmtPrice, fmtUsd } from '@/lib/format';
 import { Disclaimer, SectionTitle, StatusPill } from '@/components/ui';
+import { SYMBOLS, SYMBOL_MAP, ASSET_CLASS_LABEL } from '@/lib/symbols';
+import { CLUSTERS, clusterForSymbol, type OpenPosition } from '@/lib/correlation';
 import type { RiskInputs, RiskStatus } from '@/lib/types';
 
 export function RiskCenterPage() {
@@ -108,8 +110,166 @@ export function RiskCenterPage() {
         )}
       </div>
 
+      <CorrelationEngine />
       <RiskTable />
       <Disclaimer />
+    </div>
+  );
+}
+
+function CorrelationEngine() {
+  const { openPositions, setOpenPositions, correlationThreshold, setCorrelationThreshold, correlationWarnings } = useApp();
+  const [newPos, setNewPos] = useState({ symbol: SYMBOLS[0].symbol, direction: 'BUY' as 'BUY' | 'SELL', riskPct: '0.5' });
+
+  const addPosition = () => {
+    const risk = parseFloat(newPos.riskPct);
+    if (!Number.isFinite(risk) || risk <= 0) return;
+    const pos: OpenPosition = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      symbol: newPos.symbol,
+      direction: newPos.direction,
+      riskPct: risk,
+    };
+    setOpenPositions((p) => [...p, pos]);
+  };
+
+  const removePosition = (id: string) => {
+    setOpenPositions((p) => p.filter((pos) => pos.id !== id));
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Layers className="w-4 h-4 text-accent-400" /> Correlation Engine</h3>
+        <span className="text-xs text-slate-500">Same-direction risk within correlated clusters</span>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Add position form */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="label">Symbol</label>
+            <select
+              className="input min-w-[12rem] text-xs"
+              value={newPos.symbol}
+              onChange={(e) => setNewPos((p) => ({ ...p, symbol: e.target.value }))}
+            >
+              {SYMBOLS.map((s) => <option key={s.symbol} value={s.symbol}>{s.symbol} — {s.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Direction</label>
+            <select
+              className="input w-auto text-xs"
+              value={newPos.direction}
+              onChange={(e) => setNewPos((p) => ({ ...p, direction: e.target.value as 'BUY' | 'SELL' }))}
+            >
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Risk %</label>
+            <input
+              className="input-mono w-20 text-xs"
+              type="number"
+              step="0.1"
+              min="0"
+              value={newPos.riskPct}
+              onChange={(e) => setNewPos((p) => ({ ...p, riskPct: e.target.value }))}
+            />
+          </div>
+          <button onClick={addPosition} className="btn-accent">
+            <Plus className="w-4 h-4" /> Add Position
+          </button>
+          <div className="flex-1" />
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500">Threshold</label>
+            <input
+              className="input-mono w-16 text-xs"
+              type="number"
+              step="0.1"
+              min="0"
+              value={correlationThreshold}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                if (Number.isFinite(v) && v > 0) setCorrelationThreshold(v);
+              }}
+            />
+            <span className="text-xs text-slate-600">%</span>
+          </div>
+        </div>
+
+        {/* Open positions list */}
+        {openPositions.length === 0 ? (
+          <p className="text-sm text-slate-500 text-center py-6">No open positions added. Add simulated trades above to check for correlation risk.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {openPositions.map((pos) => {
+              const cluster = clusterForSymbol(pos.symbol);
+              const meta = SYMBOL_MAP[pos.symbol];
+              return (
+                <div key={pos.id} className="flex items-center gap-3 px-3 py-2 rounded-md bg-terminal-900 border border-terminal-700/50">
+                  <span className="mono text-sm text-slate-200 font-medium w-20">{pos.symbol}</span>
+                  <span className={`chip ${pos.direction === 'BUY' ? 'bg-bull-500/15 text-bull-400' : 'bg-bear-500/15 text-bear-400'}`}>{pos.direction}</span>
+                  <span className="mono text-xs text-slate-400">{pos.riskPct.toFixed(2)}% risk</span>
+                  <span className="text-[10px] text-slate-600">{cluster?.name ?? 'Uncategorized'} · {ASSET_CLASS_LABEL[meta?.assetClass ?? 'forex']}</span>
+                  <div className="flex-1" />
+                  <button onClick={() => removePosition(pos.id)} className="text-slate-600 hover:text-bear-400 transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Cluster warnings */}
+        {correlationWarnings.length > 0 && (
+          <div className="space-y-3 pt-2 border-t border-terminal-700/60">
+            {correlationWarnings.map((w, i) => {
+              const isBlock = w.severity === 'BLOCK';
+              const bg = isBlock ? 'bg-bear-500/10 border-bear-500/30' : 'bg-warn-500/10 border-warn-500/30';
+              const text = isBlock ? 'text-bear-400' : 'text-warn-400';
+              return (
+                <div key={i} className={`rounded-md border p-4 ${bg}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className={`w-4 h-4 ${text}`} />
+                    <span className={`text-sm font-medium ${text}`}>{w.cluster.name} — {w.direction} cluster over threshold</span>
+                    <span className={`chip border ${isBlock ? 'bg-bear-500/15 text-bear-400 border-bear-500/30' : 'bg-warn-500/15 text-warn-400 border-warn-500/30'}`}>{w.severity}</span>
+                  </div>
+                  <div className="text-xs text-slate-400 mb-2">
+                    Combined same-direction risk: <span className={`mono font-medium ${text}`}>{w.combinedRiskPct.toFixed(2)}%</span>
+                    {' '}({w.positions.length} positions · threshold {correlationThreshold.toFixed(1)}%)
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {w.positions.map((p) => (
+                      <span key={p.id} className="chip bg-terminal-800 text-slate-300 border border-terminal-700 text-[10px]">
+                        {p.symbol} {p.direction} {p.riskPct.toFixed(2)}%
+                      </span>
+                    ))}
+                  </div>
+                  <p className={`text-xs ${text}`}>
+                    {isBlock
+                      ? 'Significantly over threshold — BLOCK new entries in this cluster. Reduce existing exposure before adding more.'
+                      : 'Moderately over threshold — REDUCE position size or close one of the correlated trades to bring combined risk below the threshold.'}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Cluster summary (no warnings) */}
+        {correlationWarnings.length === 0 && openPositions.length >= 2 && (
+          <div className="pt-2 border-t border-terminal-700/60">
+            <div className="flex items-center gap-2 text-xs text-bull-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-bull-400" />
+              No correlation warnings — same-direction cluster risk is within the threshold.
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

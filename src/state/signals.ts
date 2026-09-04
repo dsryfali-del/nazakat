@@ -11,7 +11,7 @@ import type { Signal, StrategyId, Candle } from '@/lib/types';
 // (useAllSignalsAsync — fetches real Twelve Data with fallback, for
 // Strategies). Both share the same engine logic.
 
-const ENGINE_IDS: StrategyId[] = ['trend', 'breakout', 'meanrev'];
+const ENGINE_IDS: StrategyId[] = ['trend', 'breakout', 'meanrev', 'priceaction', 'orderflow', 'range', 'momentum'];
 
 type AsyncSignalsState = {
   signals: Signal[];

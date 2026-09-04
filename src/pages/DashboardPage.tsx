@@ -6,6 +6,7 @@ import { fmtPct, fmtPctPlain, fmtPrice, fmtUsd } from '@/lib/format';
 import { decimalsFor } from '@/lib/format';
 import { STRATEGY_LABEL } from '@/lib/labels';
 import { Disclaimer, DirectionTag, GatedSetup, NewsRiskBadge, RiskGateBanner, ScoreBadge, SectionTitle, StatusPill } from '@/components/ui';
+import { TradeCard } from '@/components/TradeCard';
 import { useNewsRisk } from '@/lib/news';
 import type { Signal, RiskStatus } from '@/lib/types';
 
@@ -98,6 +99,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (tab: string) => voi
 }
 
 function TopOpportunityCard({ top, onNavigate }: { top: Signal | null; onNavigate: (t: string) => void }) {
+  const { riskInputs, risk } = useApp();
   if (!top) {
     return (
       <div className="card p-5 flex flex-col">
@@ -113,45 +115,32 @@ function TopOpportunityCard({ top, onNavigate }: { top: Signal | null; onNavigat
       </div>
     );
   }
-  const d = decimalsFor(top.symbol);
-  const meta = SYMBOL_MAP[top.symbol];
   return (
     <div className="card p-5 flex flex-col border-accent-500/30">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-slate-200">Top Opportunity</h3>
-        <ScoreBadge score={top.score} />
+        <span className="text-[10px] text-slate-600">approximate · demo</span>
       </div>
-      <div className="flex items-center gap-3 mb-4">
-        <div className="text-lg font-semibold text-slate-100 mono">{top.symbol}</div>
-        <DirectionTag direction={top.direction} />
-        <span className="text-xs text-slate-500">{STRATEGY_LABEL[top.strategy]}</span>
-      </div>
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <Cell label="Entry" value={fmtPrice(top.entry, d)} />
-        <Cell label="Stop" value={fmtPrice(top.stopLoss, d)} tone="bear" />
-        <Cell label="Target" value={fmtPrice(top.takeProfit, d)} tone="bull" />
-      </div>
-      <p className="text-xs text-slate-400 leading-relaxed mb-4 flex-1">{top.reason}</p>
-      <div className="flex items-center justify-between text-[11px] text-slate-500 mb-3">
-        <span>{meta?.label}</span>
-        <span className="mono">R:R 1.67</span>
-      </div>
-      <button onClick={() => onNavigate('strategies')} className="btn-accent w-full">View full setup</button>
+      <TradeCard signal={top} equity={riskInputs.currentEquity} riskStatus={risk.status} variant="full" />
+      <p className="text-xs text-slate-400 leading-relaxed mt-3 flex-1">{top.reason}</p>
+      <button onClick={() => onNavigate('strategies')} className="btn-accent w-full mt-4">View full setup</button>
     </div>
   );
 }
 
 function ActiveRow({ s, riskStatus }: { s: Signal; riskStatus: RiskStatus }) {
-  const d = decimalsFor(s.symbol);
+  const { riskInputs } = useApp();
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-terminal-800/50">
-      <div className="w-20 text-sm mono text-slate-200 font-medium">{s.symbol}</div>
-      <DirectionTag direction={s.direction} />
-      <div className="text-xs text-slate-500 hidden sm:block">{STRATEGY_LABEL[s.strategy]}</div>
-      <div className="flex-1" />
-      {riskStatus === 'RED' && <span className="chip bg-bear-500/15 text-bear-400 border border-bear-500/30 text-[10px]">FLAGGED</span>}
-      <div className="mono text-xs text-slate-400 hidden md:block">E {fmtPrice(s.entry, d)}</div>
-      <ScoreBadge score={s.score} />
+    <div className="px-4 py-2.5 hover:bg-terminal-800/50">
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-20 text-sm mono text-slate-200 font-medium">{s.symbol}</div>
+        <DirectionTag direction={s.direction} />
+        <div className="text-xs text-slate-500 hidden sm:block">{STRATEGY_LABEL[s.strategy]}</div>
+        <div className="flex-1" />
+        {riskStatus === 'RED' && <span className="chip bg-bear-500/15 text-bear-400 border border-bear-500/30 text-[10px]">FLAGGED</span>}
+        <ScoreBadge score={s.score} />
+      </div>
+      <TradeCard signal={s} equity={riskInputs.currentEquity} riskStatus={riskStatus} variant="row" />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { BacktestResult, BacktestTrade, Candle, RiskInputs, RiskState, RiskStatus } from './types';
+import type { BacktestResult, BacktestTrade, Candle, RiskInputs, RiskState, RiskStatus, StrategyId } from './types';
 import { runEngine } from './strategies';
 
 // Compute the live risk picture from editable inputs. All percentages are
@@ -80,7 +80,7 @@ export function positionSize(args: {
 export function runBacktest(
   symbol: string,
   candles: Candle[],
-  strategyId: 'trend' | 'breakout' | 'meanrev',
+  strategyId: StrategyId,
   options: { warmup?: number; maxHold?: number } = {},
 ): BacktestResult {
   const warmup = options.warmup ?? 55;

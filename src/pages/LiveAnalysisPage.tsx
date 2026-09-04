@@ -3,10 +3,10 @@ import { Radio, AlertTriangle } from 'lucide-react';
 import { useAllSignalsAsync, activeSignals } from '@/state/signals';
 import { useApp } from '@/state/AppContext';
 import { SYMBOL_MAP, ASSET_CLASS_LABEL, SYMBOLS } from '@/lib/symbols';
-import { ENGINES } from '@/lib/strategies';
 import { decimalsFor, fmtPrice } from '@/lib/format';
 import { STRATEGY_LABEL, STRATEGY_SHORT } from '@/lib/labels';
 import { DataBadge, DirectionTag, GatedSetup, NewsRiskBadge, RiskGateBanner, ScoreBadge, SectionTitle, Disclaimer } from '@/components/ui';
+import { TradeCard } from '@/components/TradeCard';
 import { useNewsRisk, activeNewsForSymbol } from '@/lib/news';
 import type { Signal, RiskStatus, AssetClass } from '@/lib/types';
 
@@ -15,7 +15,7 @@ const ASSET_CLASSES: (AssetClass | 'all')[] = ['all', 'forex', 'commodities', 'c
 type SortKey = 'score' | 'symbol' | 'strategy';
 
 export function LiveAnalysisPage() {
-  const { risk } = useApp();
+  const { risk, riskInputs } = useApp();
   const { signals: all, source } = useAllSignalsAsync();
   const newsEvents = useNewsRisk(SYMBOLS.map((s) => s.symbol));
 
@@ -109,12 +109,13 @@ export function LiveAnalysisPage() {
                     <th className="text-right font-medium px-3 py-2.5">Stop</th>
                     <th className="text-right font-medium px-3 py-2.5">Target</th>
                     <th className="text-center font-medium px-3 py-2.5">Data</th>
+                    <th className="text-left font-medium px-3 py-2.5">Trade Metrics</th>
                     <th className="text-left font-medium px-3 py-2.5">Notes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-terminal-700/40">
                   {rows.map((s) => (
-                    <AnalysisRow key={`${s.symbol}-${s.strategy}`} s={s} riskStatus={risk.status} globalSource={source} />
+                    <AnalysisRow key={`${s.symbol}-${s.strategy}`} s={s} riskStatus={risk.status} globalSource={source} equity={riskInputs.currentEquity} />
                   ))}
                 </tbody>
               </table>
@@ -128,7 +129,7 @@ export function LiveAnalysisPage() {
   );
 }
 
-function AnalysisRow({ s, riskStatus, globalSource }: { s: Signal; riskStatus: RiskStatus; globalSource: 'live' | 'demo' | 'loading' }) {
+function AnalysisRow({ s, riskStatus, globalSource, equity }: { s: Signal; riskStatus: RiskStatus; globalSource: 'live' | 'demo' | 'loading'; equity: number }) {
   const d = decimalsFor(s.symbol);
   const meta = SYMBOL_MAP[s.symbol];
   const hasNewsRisk = activeNewsForSymbol(s.symbol).length > 0;
@@ -155,7 +156,10 @@ function AnalysisRow({ s, riskStatus, globalSource }: { s: Signal; riskStatus: R
           {rowSource === 'live' ? 'Live' : 'Demo'}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-xs text-slate-400 max-w-[12rem]">
+      <td className="px-3 py-2.5">
+        <TradeCard signal={s} equity={equity} riskStatus={riskStatus} variant="row" />
+      </td>
+      <td className="px-3 py-2.5 text-xs text-slate-400 max-w-[8rem]">
         {hasNewsRisk && (
           <span className="text-warn-400/80 flex items-center gap-1">
             <span className="w-1 h-1 rounded-full bg-warn-400" />

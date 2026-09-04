@@ -1,5 +1,6 @@
 import type { Candle, Signal, StrategyId } from './types';
 import { atr, closes, ema, rollingHigh, rollingLow, sma } from './indicators';
+import { SYMBOL_MAP } from './symbols';
 
 // Each engine is a pure function: given the candle series available up to "now"
 // (the last bar), return a Signal. No look-ahead — only the passed slice is used.
@@ -175,10 +176,324 @@ export const meanRevEngine: EngineFn = (symbol, candles) => {
   };
 };
 
+// ---- Price Action: fractal swing high/low with retest confirmation ----
+function findSwingHighs(candles: Candle[]): { index: number; price: number }[] {
+  const swings: { index: number; price: number }[] = [];
+  for (let i = 2; i < candles.length - 2; i++) {
+    if (
+      candles[i].high > candles[i - 1].high && candles[i].high > candles[i - 2].high &&
+      candles[i].high > candles[i + 1].high && candles[i].high > candles[i + 2].high
+    ) {
+      swings.push({ index: i, price: candles[i].high });
+    }
+  }
+  return swings;
+}
+
+function findSwingLows(candles: Candle[]): { index: number; price: number }[] {
+  const swings: { index: number; price: number }[] = [];
+  for (let i = 2; i < candles.length - 2; i++) {
+    if (
+      candles[i].low < candles[i - 1].low && candles[i].low < candles[i - 2].low &&
+      candles[i].low < candles[i + 1].low && candles[i].low < candles[i + 2].low
+    ) {
+      swings.push({ index: i, price: candles[i].low });
+    }
+  }
+  return swings;
+}
+
+export const priceActionEngine: EngineFn = (symbol, candles) => {
+  const n = candles.length;
+  const last = candles[n - 1];
+  const atrArr = atr(candles, 14);
+  const atrVal = atrArr[n - 1] || (last.high - last.low);
+
+  const swingHighs = findSwingHighs(candles);
+  const swingLows = findSwingLows(candles);
+  if (swingHighs.length === 0 && swingLows.length === 0) return NO_TRADE_BASE(symbol, 'priceaction', candles, atrVal);
+
+  // Most recent swing high = resistance, most recent swing low = support
+  const lastSwingHigh = swingHighs[swingHighs.length - 1];
+  const lastSwingLow = swingLows[swingLows.length - 1];
+
+  // BUY: price closes above resistance, then within 5 bars pulls back to within 0.3% and closes back above
+  if (lastSwingHigh) {
+    const level = lastSwingHigh.price;
+    const breakoutBarIdx = findBreakoutBar(candles, lastSwingHigh.index, level, 'up');
+    if (breakoutBarIdx !== -1) {
+      const retest = findRetest(candles, breakoutBarIdx, level, 0.003, 'up', 5);
+      if (retest) {
+        const precision = 1 - Math.min(1, retest.distPct / 0.003);
+        const score = clampScore(55 + precision * 40);
+        const entry = last.close;
+        const sl = entry - 1.5 * atrVal;
+        const tp = entry + 2.5 * atrVal;
+        return { symbol, strategy: 'priceaction', direction: 'BUY', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+          reason: `Price broke above swing high (${fmt(level)}) and retested within ${(retest.distPct * 100).toFixed(2)}% — bullish retest confirmed.`, time: last.time };
+      }
+    }
+  }
+
+  // SELL: mirror at support
+  if (lastSwingLow) {
+    const level = lastSwingLow.price;
+    const breakoutBarIdx = findBreakoutBar(candles, lastSwingLow.index, level, 'down');
+    if (breakoutBarIdx !== -1) {
+      const retest = findRetest(candles, breakoutBarIdx, level, 0.003, 'down', 5);
+      if (retest) {
+        const precision = 1 - Math.min(1, retest.distPct / 0.003);
+        const score = clampScore(55 + precision * 40);
+        const entry = last.close;
+        const sl = entry + 1.5 * atrVal;
+        const tp = entry - 2.5 * atrVal;
+        return { symbol, strategy: 'priceaction', direction: 'SELL', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+          reason: `Price broke below swing low (${fmt(level)}) and retested within ${(retest.distPct * 100).toFixed(2)}% — bearish retest confirmed.`, time: last.time };
+      }
+    }
+  }
+
+  return NO_TRADE_BASE(symbol, 'priceaction', candles, atrVal);
+};
+
+function findBreakoutBar(candles: Candle[], afterIdx: number, level: number, dir: 'up' | 'down'): number {
+  for (let i = afterIdx + 1; i < candles.length; i++) {
+    if (dir === 'up' && candles[i].close > level) return i;
+    if (dir === 'down' && candles[i].close < level) return i;
+  }
+  return -1;
+}
+
+function findRetest(candles: Candle[], breakoutIdx: number, level: number, tolerance: number, dir: 'up' | 'down', maxBars: number): { distPct: number } | null {
+  for (let i = breakoutIdx + 1; i < Math.min(candles.length, breakoutIdx + 1 + maxBars); i++) {
+    const distPct = Math.abs(candles[i].low - level) / level;
+    if (dir === 'up' && candles[i].low <= level * (1 + tolerance) && candles[i].close > level) {
+      return { distPct };
+    }
+    if (dir === 'down' && candles[i].high >= level * (1 - tolerance) && candles[i].close < level) {
+      return { distPct };
+    }
+  }
+  return null;
+}
+
+// ---- Order Flow (proxy): CVD + VWAP + volume aggression ----
+function computeVWAP(candles: Candle[], lookback: number): number {
+  let pv = 0, vol = 0;
+  const start = Math.max(0, candles.length - lookback);
+  for (let i = start; i < candles.length; i++) {
+    const tp = (candles[i].high + candles[i].low + candles[i].close) / 3;
+    pv += tp * candles[i].volume;
+    vol += candles[i].volume;
+  }
+  return vol > 0 ? pv / vol : candles[candles.length - 1].close;
+}
+
+export const orderFlowEngine: EngineFn = (symbol, candles) => {
+  const n = candles.length;
+  const last = candles[n - 1];
+  const atrArr = atr(candles, 14);
+  const atrVal = atrArr[n - 1] || (last.high - last.low);
+
+  if (n < 20) return NO_TRADE_BASE(symbol, 'orderflow', candles, atrVal);
+
+  // Proxy CVD: cumulative sum of ±volume over last 20 bars
+  let cvd = 0;
+  const cvdSeries: number[] = [];
+  for (let i = n - 20; i < n; i++) {
+    cvd += candles[i].close > candles[i].open ? candles[i].volume : -candles[i].volume;
+    cvdSeries.push(cvd);
+  }
+
+  // CVD rising over last 5 bars?
+  const cvdRising = cvdSeries.length >= 5 && cvdSeries[cvdSeries.length - 1] > cvdSeries[cvdSeries.length - 5];
+  const cvdFalling = cvdSeries.length >= 5 && cvdSeries[cvdSeries.length - 1] < cvdSeries[cvdSeries.length - 5];
+
+  const vwap = computeVWAP(candles, 20);
+
+  // Volume aggression: current bar volume > 1.3x 20-bar average
+  const avgVol = candles.slice(n - 20).reduce((s, c) => s + c.volume, 0) / 20;
+  const volAggression = last.volume > avgVol * 1.3;
+
+  const priceAboveVwap = last.close > vwap;
+  const priceBelowVwap = last.close < vwap;
+
+  const buyCond = cvdRising && priceAboveVwap && volAggression;
+  const sellCond = cvdFalling && priceBelowVwap && volAggression;
+
+  if (!buyCond && !sellCond) return NO_TRADE_BASE(symbol, 'orderflow', candles, atrVal);
+
+  const dir = buyCond ? 'BUY' : 'SELL';
+
+  // Score: alignment strength of all 3 conditions
+  const cvdStrength = Math.abs(cvdSeries[cvdSeries.length - 1] - cvdSeries[cvdSeries.length - 5]) / Math.max(avgVol * 5, 1);
+  const vwapDist = Math.abs(last.close - vwap) / vwap;
+  const volRatio = last.volume / Math.max(avgVol, 1);
+  let score = 45 + Math.min(cvdStrength * 200, 20) + Math.min(vwapDist * 300, 15) + Math.min((volRatio - 1.3) * 50, 15);
+  score = clampScore(score);
+
+  const entry = last.close;
+  const sl = dir === 'BUY' ? entry - 1.5 * atrVal : entry + 1.5 * atrVal;
+  const tp = dir === 'BUY' ? entry + 2.5 * atrVal : entry - 2.5 * atrVal;
+
+  return {
+    symbol, strategy: 'orderflow', direction: dir, score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+    reason: `Proxy CVD ${dir === 'BUY' ? 'rising' : 'falling'}, price ${dir === 'BUY' ? 'above' : 'below'} VWAP (${fmt(vwap)}), volume ${volRatio.toFixed(1)}x avg — proxy order flow confirms ${dir === 'BUY' ? 'buying' : 'selling'} pressure.`,
+    time: last.time,
+  };
+};
+
+// ---- Range Trading: 30-bar range with rejection / false-breakout fade ----
+export const rangeEngine: EngineFn = (symbol, candles) => {
+  const n = candles.length;
+  const last = candles[n - 1];
+  const atrArr = atr(candles, 14);
+  const atrVal = atrArr[n - 1] || (last.high - last.low);
+
+  if (n < 30) return NO_TRADE_BASE(symbol, 'range', candles, atrVal);
+
+  const lookback = candles.slice(n - 30);
+  const rangeHigh = Math.max(...lookback.map((c) => c.high));
+  const rangeLow = Math.min(...lookback.map((c) => c.low));
+  const rangeSize = rangeHigh - rangeLow;
+  const rangePct = rangeSize / last.close;
+
+  // Must be ranging: (high - low) / price <= 3%
+  if (rangePct > 0.03) return NO_TRADE_BASE(symbol, 'range', candles, atrVal);
+
+  // Force NO TRADE if ATR(14) > 1.5x its 20-period average (volatility expanding)
+  if (n >= 34) {
+    const atrSlice = atrArr.slice(n - 20);
+    const validAtr = atrSlice.filter((v) => !Number.isNaN(v));
+    if (validAtr.length > 0) {
+      const avgAtr = validAtr.reduce((s, v) => s + v, 0) / validAtr.length;
+      if (atrVal > avgAtr * 1.5) return NO_TRADE_BASE(symbol, 'range', candles, atrVal);
+    }
+  }
+
+  const midpoint = (rangeHigh + rangeLow) / 2;
+  const tolerance = 0.002; // 0.2%
+
+  // False-breakout fade: price closed outside range within last 2 bars, then closed back inside
+  for (let i = n - 2; i < n; i++) {
+    if (candles[i].close < rangeLow && last.close > rangeLow) {
+      const entry = last.close;
+      const sl = entry - 1.5 * atrVal;
+      const tp = entry + 2.5 * atrVal;
+      const score = clampScore(58);
+      return { symbol, strategy: 'range', direction: 'BUY', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+        reason: `False breakdown below range low (${fmt(rangeLow)}) — price closed back inside, fade reversal long.`, time: last.time };
+    }
+    if (candles[i].close > rangeHigh && last.close < rangeHigh) {
+      const entry = last.close;
+      const sl = entry + 1.5 * atrVal;
+      const tp = entry - 2.5 * atrVal;
+      const score = clampScore(58);
+      return { symbol, strategy: 'range', direction: 'SELL', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+        reason: `False breakout above range high (${fmt(rangeHigh)}) — price closed back inside, fade reversal short.`, time: last.time };
+    }
+  }
+
+  // BUY: price touched within 0.2% of range low and closed back above
+  if (last.low <= rangeLow * (1 + tolerance) && last.close > rangeLow) {
+    const entry = last.close;
+    const sl = entry - 1.5 * atrVal;
+    const tp = entry + 2.5 * atrVal;
+    const proximity = 1 - Math.min(1, Math.abs(last.low - rangeLow) / (rangeLow * tolerance));
+    const score = clampScore(50 + proximity * 20);
+    return { symbol, strategy: 'range', direction: 'BUY', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+      reason: `Price rejected at range low (${fmt(rangeLow)}) — range bounce long, midpoint target ${fmt(midpoint)}.`, time: last.time };
+  }
+
+  // SELL: price touched within 0.2% of range high and closed back below
+  if (last.high >= rangeHigh * (1 - tolerance) && last.close < rangeHigh) {
+    const entry = last.close;
+    const sl = entry + 1.5 * atrVal;
+    const tp = entry - 2.5 * atrVal;
+    const proximity = 1 - Math.min(1, Math.abs(last.high - rangeHigh) / (rangeHigh * tolerance));
+    const score = clampScore(50 + proximity * 20);
+    return { symbol, strategy: 'range', direction: 'SELL', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+      reason: `Price rejected at range high (${fmt(rangeHigh)}) — range fade short, midpoint target ${fmt(midpoint)}.`, time: last.time };
+  }
+
+  return NO_TRADE_BASE(symbol, 'range', candles, atrVal);
+};
+
+// ---- Momentum: displacement bar + shallow pullback ----
+export const momentumEngine: EngineFn = (symbol, candles) => {
+  const n = candles.length;
+  const last = candles[n - 1];
+  const atrArr = atr(candles, 14);
+  const atrVal = atrArr[n - 1] || (last.high - last.low);
+
+  if (n < 12) return NO_TRADE_BASE(symbol, 'momentum', candles, atrVal);
+
+  // Find displacement bar: body > 1.5x average body of prior 10 candles
+  const lookback = candles.slice(n - 11, n - 1); // 10 bars before last
+  const avgBody = lookback.reduce((s, c) => s + Math.abs(c.close - c.open), 0) / 10;
+  const avgVol = lookback.reduce((s, c) => s + c.volume, 0) / 10;
+
+  // Check bars from most recent going back up to 5 for a displacement bar
+  for (let i = n - 1; i >= Math.max(n - 5, 11); i--) {
+    const bar = candles[i];
+    const body = Math.abs(bar.close - bar.open);
+    const isBullish = bar.close > bar.open;
+    const isBearish = bar.close < bar.open;
+    if (body <= avgBody * 1.5) continue;
+    if (bar.volume <= avgVol * 1.3) continue;
+
+    // Displacement bar found — check pullback in subsequent bars
+    const dispRange = bar.high - bar.low;
+    const retracementLevel = isBullish ? bar.high - dispRange * 0.5 : bar.low + dispRange * 0.5;
+
+    let pullbackValid = false;
+    let pullbackPct = 1; // how much of the displacement was retraced (lower = better)
+    for (let j = i + 1; j < n; j++) {
+      if (isBullish) {
+        const retraced = (bar.high - candles[j].low) / dispRange;
+        if (candles[j].low <= retracementLevel && candles[j].close > retracementLevel) {
+          pullbackValid = true;
+          pullbackPct = Math.min(pullbackPct, retraced);
+        }
+      } else {
+        const retraced = (candles[j].high - bar.low) / dispRange;
+        if (candles[j].high >= retracementLevel && candles[j].close < retracementLevel) {
+          pullbackValid = true;
+          pullbackPct = Math.min(pullbackPct, retraced);
+        }
+      }
+    }
+
+    if (!pullbackValid) continue;
+
+    const dir = isBullish ? 'BUY' : 'SELL';
+    const displacementStrength = body / Math.max(avgBody, 1e-9);
+    const shallowness = 1 - Math.min(1, pullbackPct / 0.5);
+    let score = 50 + Math.min((displacementStrength - 1.5) * 30, 25) + shallowness * 20;
+    score = clampScore(score);
+
+    const entry = last.close;
+    const sl = dir === 'BUY' ? entry - 1.5 * atrVal : entry + 1.5 * atrVal;
+    const tp = dir === 'BUY' ? entry + 2.5 * atrVal : entry - 2.5 * atrVal;
+
+    return {
+      symbol, strategy: 'momentum', direction: dir, score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+      reason: `Displacement bar (${displacementStrength.toFixed(1)}x avg body, ${dir === 'BUY' ? 'bullish' : 'bearish'}) with volume ${bar.volume > 0 ? (bar.volume / Math.max(avgVol, 1)).toFixed(1) : '—'}x avg. Pullback retraced ${(pullbackPct * 100).toFixed(0)}% — ${dir === 'BUY' ? 'shallow pullback held above 50% level' : 'shallow pullback held below 50% level'}.`,
+      time: last.time,
+    };
+  }
+
+  return NO_TRADE_BASE(symbol, 'momentum', candles, atrVal);
+};
+
 export const ENGINES: Record<StrategyId, { fn: EngineFn; name: string; short: string }> = {
   trend: { fn: trendEngine, name: 'Trend Following', short: 'EMA20/EMA50' },
   breakout: { fn: breakoutEngine, name: 'Breakout + Retest', short: '20-bar high/low' },
   meanrev: { fn: meanRevEngine, name: 'Mean Reversion', short: 'SMA(20) deviation' },
+  priceaction: { fn: priceActionEngine, name: 'Price Action', short: 'Swing retest' },
+  orderflow: { fn: orderFlowEngine, name: 'Order Flow (Proxy)', short: 'CVD+VWAP proxy' },
+  range: { fn: rangeEngine, name: 'Range Trading', short: '30-bar range' },
+  momentum: { fn: momentumEngine, name: 'Momentum', short: 'Displacement' },
 };
 
 export function runEngine(strategy: StrategyId, symbol: string, candles: Candle[]): Signal {

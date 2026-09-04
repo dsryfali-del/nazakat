@@ -22,7 +22,7 @@ export type SymbolMeta = {
 
 export type Direction = 'BUY' | 'SELL' | 'NO TRADE';
 
-export type StrategyId = 'trend' | 'breakout' | 'meanrev';
+export type StrategyId = 'trend' | 'breakout' | 'meanrev' | 'priceaction' | 'orderflow' | 'range' | 'momentum';
 
 export type Signal = {
   symbol: string;

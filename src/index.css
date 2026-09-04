@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #0a0e17;
+  color: #c7d2e0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smmoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  border-color: rgba(45, 58, 82, 0.5);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0d1320;
+}
+::-webkit-scrollbar-thumb {
+  background: #2d3a52;
+  border-radius: 5px;
+  border: 2px solid #0d1320;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3b4a66;
+}
+
+@layer components {
+  .card {
+    @apply bg-terminal-850 border border-terminal-700/70 rounded-lg;
+  }
+  .card-header {
+    @apply px-4 py-3 border-b border-terminal-700/70 flex items-center justify-between;
+  }
+  .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-accent {
+    @apply btn bg-accent-600 hover:bg-accent-500 text-white;
+  }
+  .btn-ghost {
+    @apply btn bg-terminal-750 hover:bg-terminal-700 text-slate-300 border border-terminal-700;
+  }
+  .btn-danger {
+    @apply btn bg-bear-600/20 hover:bg-bear-600/30 text-bear-400 border border-bear-600/30;
+  }
+  .input {
+    @apply w-full bg-terminal-900 border border-terminal-700 rounded-md px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-accent-500 transition-colors;
+  }
+  .input-mono {
+    @apply input mono tabular-nums;
+  }
+  .label {
+    @apply block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1.5;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+  .chip {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium mono;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* subtle fade-in for tab content */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}

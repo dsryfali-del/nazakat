@@ -4,7 +4,7 @@ import { SYMBOLS, ASSET_CLASS_LABEL } from '@/lib/symbols';
 import { generateSeries } from '@/lib/data';
 import { useAllSignals, activeSignals } from '@/state/signals';
 import { decimalsFor, fmtPct, fmtPrice } from '@/lib/format';
-import { Disclaimer, DirectionTag, SectionTitle, ScoreBadge } from '@/components/ui';
+import { Disclaimer, DirectionTag, SectionTitle } from '@/components/ui';
 
 export function MarketsPage() {
   const all = useAllSignals();
@@ -62,7 +62,7 @@ export function MarketsPage() {
                         <span className="text-xs text-slate-600 flex items-center gap-1"><CandlestickChart className="w-3 h-3" /> No active setup</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-right">{r.best ? <ScoreBadge score={r.best.score} /> : <span className="text-xs text-slate-600">—</span>}</td>
+                    <td className="px-3 py-2.5 text-right">{r.best ? <span className="text-xs mono text-accent-300 font-medium">{(r.best.score / 10).toFixed(1)}/10</span> : <span className="text-xs text-slate-600">—</span>}</td>
                   </tr>
                 );
               })}

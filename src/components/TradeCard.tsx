@@ -3,7 +3,7 @@ import { SYMBOL_MAP } from '@/lib/symbols';
 import { decimalsFor, fmtPrice, fmtUsd, fmtNum } from '@/lib/format';
 import { positionSize, RECOMMENDED_RISK } from '@/lib/risk';
 import { STRATEGY_LABEL } from '@/lib/labels';
-import { DirectionTag, ScoreBadge } from '@/components/ui';
+import { DirectionTag } from '@/components/ui';
 import { activeNewsForSymbol } from '@/lib/news';
 import { AlertTriangle } from 'lucide-react';
 
@@ -72,7 +72,6 @@ export function TradeCard({ signal, equity, riskStatus, variant = 'full' }: Trad
           <DirectionTag direction={signal.direction} />
           <span className="flex-1" />
           <span className="text-xs mono text-accent-300 font-medium">{rating}/10</span>
-          <ScoreBadge score={signal.score} />
         </div>
         <div className="grid grid-cols-3 gap-2 text-[11px]">
           <Metric label="Entry" value={fmtPrice(signal.entry, d)} />
@@ -111,7 +110,6 @@ export function TradeCard({ signal, equity, riskStatus, variant = 'full' }: Trad
         <span className="flex-1" />
         <div className="flex items-center gap-2">
           <span className="text-sm mono text-accent-300 font-medium">{rating}<span className="text-slate-600 text-xs">/10</span></span>
-          <ScoreBadge score={signal.score} />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3">

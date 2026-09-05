@@ -5,7 +5,7 @@ import { SYMBOL_MAP, SYMBOLS } from '@/lib/symbols';
 import { fmtPct, fmtPctPlain, fmtPrice, fmtUsd } from '@/lib/format';
 import { decimalsFor } from '@/lib/format';
 import { STRATEGY_LABEL } from '@/lib/labels';
-import { Disclaimer, DirectionTag, GatedSetup, NewsRiskBadge, RiskGateBanner, ScoreBadge, SectionTitle, StatusPill } from '@/components/ui';
+import { Disclaimer, DirectionTag, GatedSetup, NewsRiskBadge, RiskGateBanner, SectionTitle, StatusPill } from '@/components/ui';
 import { TradeCard } from '@/components/TradeCard';
 import { useNewsRisk } from '@/lib/news';
 import type { Signal, RiskStatus } from '@/lib/types';
@@ -138,7 +138,7 @@ function ActiveRow({ s, riskStatus }: { s: Signal; riskStatus: RiskStatus }) {
         <div className="text-xs text-slate-500 hidden sm:block">{STRATEGY_LABEL[s.strategy]}</div>
         <div className="flex-1" />
         {riskStatus === 'RED' && <span className="chip bg-bear-500/15 text-bear-400 border border-bear-500/30 text-[10px]">FLAGGED</span>}
-        <ScoreBadge score={s.score} />
+        <span className="text-xs mono text-accent-300 font-medium">{(s.score / 10).toFixed(1)}/10</span>
       </div>
       <TradeCard signal={s} equity={riskInputs.currentEquity} riskStatus={riskStatus} variant="row" />
     </div>

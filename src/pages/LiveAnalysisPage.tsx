@@ -5,7 +5,7 @@ import { useApp } from '@/state/AppContext';
 import { SYMBOL_MAP, ASSET_CLASS_LABEL, SYMBOLS } from '@/lib/symbols';
 import { decimalsFor, fmtPrice } from '@/lib/format';
 import { STRATEGY_LABEL, STRATEGY_SHORT } from '@/lib/labels';
-import { DataBadge, DirectionTag, GatedSetup, NewsRiskBadge, RiskGateBanner, ScoreBadge, SectionTitle, Disclaimer } from '@/components/ui';
+import { DataBadge, DirectionTag, GatedSetup, NewsRiskBadge, RiskGateBanner, SectionTitle, Disclaimer } from '@/components/ui';
 import { TradeCard } from '@/components/TradeCard';
 import { useNewsRisk, activeNewsForSymbol } from '@/lib/news';
 import type { Signal, RiskStatus, AssetClass } from '@/lib/types';
@@ -146,7 +146,7 @@ function AnalysisRow({ s, riskStatus, globalSource, equity }: { s: Signal; riskS
         <div className="text-[10px] text-slate-600">{STRATEGY_SHORT[s.strategy]}</div>
       </td>
       <td className="px-3 py-2.5"><DirectionTag direction={s.direction} /></td>
-      <td className="px-3 py-2.5 text-right"><ScoreBadge score={s.score} /></td>
+      <td className="px-3 py-2.5 text-right"><span className="text-xs mono text-accent-300 font-medium">{(s.score / 10).toFixed(1)}/10</span></td>
       <td className="px-3 py-2.5 text-right mono text-slate-300">{fmtPrice(s.entry, d)}</td>
       <td className="px-3 py-2.5 text-right mono text-bear-400/90">{fmtPrice(s.stopLoss, d)}</td>
       <td className="px-3 py-2.5 text-right mono text-bull-400/90">{fmtPrice(s.takeProfit, d)}</td>

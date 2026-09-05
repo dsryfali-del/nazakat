@@ -1,5 +1,25 @@
 import type { BacktestResult, BacktestTrade, Candle, RiskInputs, RiskState, RiskStatus, StrategyId } from './types';
 import { runEngine } from './strategies';
+import { atr as atrFn } from './indicators';
+
+// Spread cost per symbol (in price units, subtracted from favorable side at entry).
+const SPREAD_COSTS: Record<string, number> = {
+  AUDUSD: 0.00015,
+  USDCAD: 0.00015,
+  GBPUSD: 0.00015,
+  USDJPY: 0.015,
+  XAUUSD: 0.25,
+  XAGUSD: 0.02,
+  BTCUSD: 15,
+  US500: 0.5,
+};
+const DEFAULT_SPREAD = 0.02; // individual stocks and any unlisted symbol
+const SLIPPAGE_PCT = 0.05; // 5% of ATR(14) at entry, applied unfavorably
+const COMMISSION_RT = 0.0004; // 0.04% round-turn (0.02% entry + 0.02% exit)
+
+function spreadFor(symbol: string): number {
+  return SPREAD_COSTS[symbol] ?? DEFAULT_SPREAD;
+}
 
 // Compute the live risk picture from editable inputs. All percentages are
 // expressed as positive numbers where "used" reflects how much of a limit is
@@ -81,11 +101,16 @@ export function runBacktest(
   symbol: string,
   candles: Candle[],
   strategyId: StrategyId,
-  options: { warmup?: number; maxHold?: number } = {},
+  options: { warmup?: number; maxHold?: number; includeCosts?: boolean } = {},
 ): BacktestResult {
   const warmup = options.warmup ?? 55;
   const maxHold = options.maxHold ?? 15;
+  const includeCosts = options.includeCosts ?? true;
+  const spread = spreadFor(symbol);
   const trades: BacktestTrade[] = [];
+  let totalCosts = 0;
+
+  const atrArr = atrFn(candles, 14);
 
   let i = warmup;
   while (i < candles.length - 1) {
@@ -95,10 +120,18 @@ export function runBacktest(
       i++;
       continue;
     }
-    const entry = sig.entry;
+    const rawEntry = sig.entry;
     const sl = sig.stopLoss;
     const tp = sig.takeProfit;
     const dir = sig.direction;
+    const atrVal = atrArr[i] || (candles[i].high - candles[i].low);
+
+    // Apply costs to entry: spread + slippage (unfavorable direction)
+    const slip = includeCosts ? atrVal * SLIPPAGE_PCT : 0;
+    const entry = includeCosts
+      ? dir === 'BUY' ? rawEntry + spread / 2 + slip : rawEntry - spread / 2 - slip
+      : rawEntry;
+
     let exitBar = -1;
     let exitPrice = entry;
     let outcome: 'win' | 'loss' | 'timeout' = 'timeout';
@@ -119,21 +152,37 @@ export function runBacktest(
       exitPrice = candles[exitBar].close;
     }
 
+    // Apply slippage to exit (unfavorable direction)
+    const exitSlip = includeCosts ? atrVal * SLIPPAGE_PCT : 0;
+    const finalExit = includeCosts
+      ? dir === 'BUY' ? exitPrice - exitSlip : exitPrice + exitSlip
+      : exitPrice;
+
     const riskPerUnit = Math.abs(entry - sl);
-    const pnl = dir === 'BUY' ? exitPrice - entry : entry - exitPrice;
-    const rMultiple = riskPerUnit > 0 ? pnl / riskPerUnit : 0;
+    const pnl = dir === 'BUY' ? finalExit - entry : entry - finalExit;
+
+    // Commission: 0.04% round-turn on notional (entry price × position size)
+    // Position size derived from a standard $10k account risking 1% per trade
+    const notional = entry * (10000 * 0.01 / Math.max(riskPerUnit, 1e-9));
+    const commission = includeCosts ? notional * COMMISSION_RT : 0;
+    // Convert commission to R-multiple impact
+    const commissionR = riskPerUnit > 0 ? commission / (riskPerUnit * (10000 * 0.01 / Math.max(riskPerUnit, 1e-9))) : 0;
+
+    const rMultiple = riskPerUnit > 0 ? pnl / riskPerUnit - commissionR : 0;
+
+    totalCosts += includeCosts ? (spread + slip + exitSlip) * (10000 * 0.01 / Math.max(riskPerUnit, 1e-9)) + commission : 0;
 
     trades.push({
       index: trades.length + 1, direction: dir, entryBar: i, entryPrice: entry,
-      exitBar, exitPrice, outcome, rMultiple, reason,
+      exitBar, exitPrice: finalExit, outcome, rMultiple, reason,
     });
     i = exitBar + 1;
   }
 
-  return summarize(trades);
+  return summarize(trades, totalCosts);
 }
 
-function summarize(trades: BacktestTrade[]): BacktestResult {
+function summarize(trades: BacktestTrade[], totalCosts = 0): BacktestResult {
   const totalTrades = trades.length;
   const wins = trades.filter((t) => t.rMultiple > 0).length;
   const losses = trades.filter((t) => t.rMultiple <= 0).length;
@@ -152,5 +201,5 @@ function summarize(trades: BacktestTrade[]): BacktestResult {
     maxDd = Math.max(maxDd, peak - cum);
   }
 
-  return { totalTrades, wins, losses, winRate, profitFactor, expectancy, maxDrawdownR: maxDd, trades, equityCurve };
+  return { totalTrades, wins, losses, winRate, profitFactor, expectancy, maxDrawdownR: maxDd, totalCosts, trades, equityCurve };
 }

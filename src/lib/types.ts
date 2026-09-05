@@ -102,6 +102,7 @@ export type BacktestResult = {
   profitFactor: number;
   expectancy: number; // avg R
   maxDrawdownR: number;
+  totalCosts: number; // sum of spread+slippage+commission in $
   trades: BacktestTrade[];
   equityCurve: number[]; // cumulative R per trade
 };

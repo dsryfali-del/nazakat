@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlaskConical, Play, Layers } from 'lucide-react';
+import { FlaskConical, Play, Layers, DollarSign } from 'lucide-react';
 import { SYMBOLS } from '@/lib/symbols';
 import { runBacktest } from '@/lib/risk';
 import { fetchCandlesForRange, TIMEFRAMES, type Timeframe } from '@/lib/marketData';
@@ -34,6 +34,7 @@ export function BacktestPage() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<WalkForwardResult | null>(null);
   const [ran, setRan] = useState(false);
+  const [includeCosts, setIncludeCosts] = useState(true);
 
   // Fetch candle data when symbol/timeframe/date-range changes.
   useEffect(() => {
@@ -56,7 +57,7 @@ export function BacktestPage() {
     setRunning(true);
     // Defer so the UI can show a running state.
     setTimeout(() => {
-      const wf = runWalkForward(symbol, candles, strategy);
+      const wf = runWalkForward(symbol, candles, strategy, includeCosts);
       setResult(wf);
       setRan(true);
       setRunning(false);
@@ -103,6 +104,17 @@ export function BacktestPage() {
           <button onClick={run} disabled={running || candles.length < 60 || source === 'loading'} className="btn-accent">
             <Play className="w-4 h-4" /> {running ? 'Running…' : 'Run Backtest'}
           </button>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <span className="text-xs text-slate-400">Include trading costs</span>
+              <button
+                onClick={() => setIncludeCosts((v) => !v)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${includeCosts ? 'bg-accent-600' : 'bg-terminal-700'}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${includeCosts ? 'left-4.5' : 'left-0.5'}`} style={{ transform: includeCosts ? 'translateX(16px)' : 'translateX(0)' }} />
+              </button>
+            </label>
+          </div>
           <div className="flex-1" />
           <div className="text-xs text-slate-500">
             {candles.length > 0 ? `${candles.length} bars loaded` : 'Loading data…'}
@@ -136,14 +148,14 @@ type WalkForwardResult = {
   allCandles: Candle[];
 };
 
-function runWalkForward(symbol: string, candles: Candle[], strategy: StrategyId): WalkForwardResult {
+function runWalkForward(symbol: string, candles: Candle[], strategy: StrategyId, includeCosts: boolean): WalkForwardResult {
   const n = candles.length;
   const trainEnd = Math.floor(n * 0.6);
   const valEnd = Math.floor(n * 0.8);
 
-  const training = runBacktest(symbol, candles.slice(0, trainEnd), strategy);
-  const validation = runBacktest(symbol, candles.slice(trainEnd, valEnd), strategy);
-  const outOfSample = runBacktest(symbol, candles.slice(valEnd), strategy);
+  const training = runBacktest(symbol, candles.slice(0, trainEnd), strategy, { includeCosts });
+  const validation = runBacktest(symbol, candles.slice(trainEnd, valEnd), strategy, { includeCosts });
+  const outOfSample = runBacktest(symbol, candles.slice(valEnd), strategy, { includeCosts });
 
   const phases: Phase[] = [
     { name: 'Training', start: 0, end: trainEnd, color: '#6366f1' },
@@ -241,6 +253,7 @@ function PhaseResults({ phase, res, color }: { phase: string; res: BacktestResul
         <MetricRow label="Expectancy" value={fmtR(res.expectancy)} tone={res.expectancy >= 0 ? 'bull' : 'bear'} />
         <MetricRow label="Max DD (R)" value={res.maxDrawdownR.toFixed(2)} tone="bear" />
         <MetricRow label="Wins / Losses" value={`${res.wins} / ${res.losses}`} />
+        <MetricRow label="Total Costs" value={`${res.totalCosts.toFixed(0)}`} tone="bear" />
       </div>
     </div>
   );

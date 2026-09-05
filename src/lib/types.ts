@@ -103,6 +103,8 @@ export type BacktestResult = {
   expectancy: number; // avg R
   maxDrawdownR: number;
   totalCosts: number; // sum of spread+slippage+commission in $
+  sharpe: number | null;
+  sortino: number | null;
   trades: BacktestTrade[];
   equityCurve: number[]; // cumulative R per trade
 };

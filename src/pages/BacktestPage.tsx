@@ -254,6 +254,8 @@ function PhaseResults({ phase, res, color }: { phase: string; res: BacktestResul
         <MetricRow label="Max DD (R)" value={res.maxDrawdownR.toFixed(2)} tone="bear" />
         <MetricRow label="Wins / Losses" value={`${res.wins} / ${res.losses}`} />
         <MetricRow label="Total Costs" value={`${res.totalCosts.toFixed(0)}`} tone="bear" />
+        <MetricRow label="Sharpe Ratio" value={res.sharpe === null ? 'N/A' : res.sharpe.toFixed(2)} tone={res.sharpe === null ? 'bear' : res.sharpe > 1 ? 'bull' : res.sharpe > 0 ? 'warn' : 'bear'} />
+        <MetricRow label="Sortino Ratio" value={res.sortino === null ? 'N/A' : res.sortino.toFixed(2)} tone={res.sortino === null ? 'bear' : res.sortino > 1 ? 'bull' : res.sortino > 0 ? 'warn' : 'bear'} />
       </div>
     </div>
   );
@@ -350,8 +352,8 @@ function TradeLogCard({ title, trades, maxH }: { title: string; trades: Backtest
   );
 }
 
-function MetricRow({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'bull' | 'bear' }) {
-  const color = tone === 'bull' ? 'text-bull-400' : tone === 'bear' ? 'text-bear-400' : 'text-slate-200';
+function MetricRow({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'bull' | 'bear' | 'warn' }) {
+  const color = tone === 'bull' ? 'text-bull-400' : tone === 'bear' ? 'text-bear-400' : tone === 'warn' ? 'text-warn-400' : 'text-slate-200';
   return (
     <div className="flex items-center justify-between">
       <span className="text-xs text-slate-500">{label}</span>

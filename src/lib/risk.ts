@@ -201,5 +201,25 @@ function summarize(trades: BacktestTrade[], totalCosts = 0): BacktestResult {
     maxDd = Math.max(maxDd, peak - cum);
   }
 
-  return { totalTrades, wins, losses, winRate, profitFactor, expectancy, maxDrawdownR: maxDd, totalCosts, trades, equityCurve };
+  return { totalTrades, wins, losses, winRate, profitFactor, expectancy, maxDrawdownR: maxDd, totalCosts, sharpe: computeSharpe(trades), sortino: computeSortino(trades), trades, equityCurve };
+}
+
+function computeSharpe(trades: BacktestTrade[]): number | null {
+  if (trades.length < 2) return null;
+  const rs = trades.map((t) => t.rMultiple);
+  const mean = rs.reduce((s, r) => s + r, 0) / rs.length;
+  const variance = rs.reduce((s, r) => s + (r - mean) ** 2, 0) / (rs.length - 1);
+  const std = Math.sqrt(variance);
+  if (std === 0) return null;
+  return mean / std;
+}
+
+function computeSortino(trades: BacktestTrade[]): number | null {
+  if (trades.length < 2) return null;
+  const rs = trades.map((t) => t.rMultiple);
+  const mean = rs.reduce((s, r) => s + r, 0) / rs.length;
+  const downsideSum = rs.reduce((s, r) => s + Math.min(r, 0) ** 2, 0);
+  const downsideDev = Math.sqrt(downsideSum / rs.length);
+  if (downsideDev === 0) return null;
+  return mean / downsideDev;
 }

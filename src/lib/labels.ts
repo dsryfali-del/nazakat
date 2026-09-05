@@ -18,6 +18,9 @@ export const STRATEGY_LABEL: Record<string, string> = {
   orderflow: 'Order Flow (Proxy)',
   range: 'Range Trading',
   momentum: 'Momentum',
+  liquidity: 'Liquidity / SMC',
+  marketstructure: 'Market Structure',
+  quantmulti: 'Quantitative Multi-Factor',
 };
 
 export const STRATEGY_SHORT: Record<string, string> = {
@@ -28,4 +31,7 @@ export const STRATEGY_SHORT: Record<string, string> = {
   orderflow: 'CVD+VWAP proxy',
   range: '30-bar range',
   momentum: 'Displacement',
+  liquidity: 'SMC sweeps',
+  marketstructure: 'HH/HL structure',
+  quantmulti: 'Multi-factor blend',
 };

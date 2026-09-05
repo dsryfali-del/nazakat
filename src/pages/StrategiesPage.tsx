@@ -12,7 +12,7 @@ import { STRATEGY_LABEL, STRATEGY_SHORT } from '@/lib/labels';
 import { fmtPrice, decimalsFor } from '@/lib/format';
 import type { Signal, StrategyId, RiskStatus } from '@/lib/types';
 
-const ENGINE_IDS: StrategyId[] = ['trend', 'breakout', 'meanrev', 'priceaction', 'orderflow', 'range', 'momentum'];
+const ENGINE_IDS: StrategyId[] = ['trend', 'breakout', 'meanrev', 'priceaction', 'orderflow', 'range', 'momentum', 'liquidity', 'marketstructure', 'quantmulti'];
 
 function ratingFromScore(score: number): string {
   return (score / 10).toFixed(1);

@@ -486,6 +486,239 @@ export const momentumEngine: EngineFn = (symbol, candles) => {
   return NO_TRADE_BASE(symbol, 'momentum', candles, atrVal);
 };
 
+// ---- Liquidity / SMC: equal highs/lows, sweeps, and BOS ----
+function findLiquidityPools(swings: { index: number; price: number }[], tolerance: number): { index: number; price: number }[] {
+  const pools: { index: number; price: number }[] = [];
+  for (let i = 0; i < swings.length; i++) {
+    for (let j = i + 1; j < swings.length; j++) {
+      if (Math.abs(swings[i].price - swings[j].price) / Math.max(swings[i].price, 1e-9) <= tolerance) {
+        const avg = (swings[i].price + swings[j].price) / 2;
+        pools.push({ index: Math.max(swings[i].index, swings[j].index), price: avg });
+      }
+    }
+  }
+  return pools;
+}
+
+export const liquidityEngine: EngineFn = (symbol, candles) => {
+  const n = candles.length;
+  const last = candles[n - 1];
+  const atrArr = atr(candles, 14);
+  const atrVal = atrArr[n - 1] || (last.high - last.low);
+
+  const recentCandles = candles.slice(Math.max(0, n - 20));
+  const swingHighs = findSwingHighs(recentCandles).map((s) => ({ ...s, index: s.index + Math.max(0, n - 20) }));
+  const swingLows = findSwingLows(recentCandles).map((s) => ({ ...s, index: s.index + Math.max(0, n - 20) }));
+
+  const highPools = findLiquidityPools(swingHighs, 0.0015);
+  const lowPools = findLiquidityPools(swingLows, 0.0015);
+
+  if (highPools.length === 0 && lowPools.length === 0) return NO_TRADE_BASE(symbol, 'liquidity', candles, atrVal);
+
+  // Check for sweep of a low pool, then bullish BOS within 5 bars
+  for (const pool of lowPools) {
+    for (let i = pool.index; i < n; i++) {
+      // Sweep: wick below pool level, close back above
+      if (candles[i].low < pool.price && candles[i].close > pool.price) {
+        // Look for bullish BOS (close above most recent swing high) within next 5 bars
+        const recentSwingHigh = swingHighs.filter((s) => s.index < i).pop();
+        if (recentSwingHigh) {
+          for (let j = i; j < Math.min(n, i + 6); j++) {
+            if (candles[j].close > recentSwingHigh.price) {
+              const entry = last.close;
+              const sl = pool.price - atrVal * 0.3; // SL beyond swept level
+              const tp = entry + 2.5 * atrVal;
+              // Find nearest opposing pool for TP, else use 2.5x ATR
+              const opposingPool = highPools.filter((p) => p.price > entry).sort((a, b) => a.price - b.price)[0];
+              const finalTp = opposingPool ? opposingPool.price : tp;
+              const sweepPrecision = 1 - Math.min(1, Math.abs(candles[i].low - pool.price) / (pool.price * 0.003));
+              let score = clampScore(55 + sweepPrecision * 25 + Math.min((j - i) === 0 ? 15 : 5, 15));
+              return { symbol, strategy: 'liquidity', direction: 'BUY', score, entry, stopLoss: sl, takeProfit: finalTp, atr: atrVal,
+                reason: `Liquidity sweep of equal lows (${fmt(pool.price)}) — wick below, close back above. Bullish BOS above swing high (${fmt(recentSwingHigh.price)}) confirms reversal.`, time: last.time };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Mirror: sweep of high pool, then bearish BOS
+  for (const pool of highPools) {
+    for (let i = pool.index; i < n; i++) {
+      if (candles[i].high > pool.price && candles[i].close < pool.price) {
+        const recentSwingLow = swingLows.filter((s) => s.index < i).pop();
+        if (recentSwingLow) {
+          for (let j = i; j < Math.min(n, i + 6); j++) {
+            if (candles[j].close < recentSwingLow.price) {
+              const entry = last.close;
+              const sl = pool.price + atrVal * 0.3;
+              const tp = entry - 2.5 * atrVal;
+              const opposingPool = lowPools.filter((p) => p.price < entry).sort((a, b) => b.price - a.price)[0];
+              const finalTp = opposingPool ? opposingPool.price : tp;
+              const sweepPrecision = 1 - Math.min(1, Math.abs(candles[i].high - pool.price) / (pool.price * 0.003));
+              let score = clampScore(55 + sweepPrecision * 25 + Math.min((j - i) === 0 ? 15 : 5, 15));
+              return { symbol, strategy: 'liquidity', direction: 'SELL', score, entry, stopLoss: sl, takeProfit: finalTp, atr: atrVal,
+                reason: `Liquidity sweep of equal highs (${fmt(pool.price)}) — wick above, close back below. Bearish BOS below swing low (${fmt(recentSwingLow.price)}) confirms reversal.`, time: last.time };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return NO_TRADE_BASE(symbol, 'liquidity', candles, atrVal);
+};
+
+// ---- Market Structure: swing sequence HH/HL/LH/LL with continuation BOS ----
+function classifySwings(highs: { index: number; price: number }[], lows: { index: number; price: number }[]) {
+  const all = [
+    ...highs.map((s) => ({ ...s, type: 'H' as const })),
+    ...lows.map((s) => ({ ...s, type: 'L' as const })),
+  ].sort((a, b) => a.index - b.index);
+  const labels: { index: number; price: number; type: 'H' | 'L'; label: string }[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const sameType = labels.filter((l) => l.type === all[i].type);
+    if (sameType.length < 1) { labels.push({ ...all[i], label: 'INIT' }); continue; }
+    const prev = sameType[sameType.length - 1];
+    if (all[i].type === 'H') {
+      labels.push({ ...all[i], label: all[i].price > prev.price ? 'HH' : 'LH' });
+    } else {
+      labels.push({ ...all[i], label: all[i].price > prev.price ? 'HL' : 'LL' });
+    }
+  }
+  return labels;
+}
+
+export const marketStructureEngine: EngineFn = (symbol, candles) => {
+  const n = candles.length;
+  const last = candles[n - 1];
+  const atrArr = atr(candles, 14);
+  const atrVal = atrArr[n - 1] || (last.high - last.low);
+
+  const swingHighs = findSwingHighs(candles);
+  const swingLows = findSwingLows(candles);
+  if (swingHighs.length < 2 || swingLows.length < 2) return NO_TRADE_BASE(symbol, 'marketstructure', candles, atrVal);
+
+  const labeled = classifySwings(swingHighs, swingLows);
+  const recentHighs = labeled.filter((l) => l.type === 'H').slice(-3);
+  const recentLows = labeled.filter((l) => l.type === 'L').slice(-3);
+
+  const bullishStructure = recentHighs.length >= 2 && recentLows.length >= 2 &&
+    recentHighs[recentHighs.length - 1].label === 'HH' && recentLows[recentLows.length - 1].label === 'HL';
+  const bearishStructure = recentHighs.length >= 2 && recentLows.length >= 2 &&
+    recentHighs[recentHighs.length - 1].label === 'LH' && recentLows[recentLows.length - 1].label === 'LL';
+
+  if (!bullishStructure && !bearishStructure) return NO_TRADE_BASE(symbol, 'marketstructure', candles, atrVal);
+
+  // Change of Character: price broke the most recent HL (uptrend) or LH (downtrend)
+  if (bullishStructure) {
+    const lastHL = recentLows[recentLows.length - 1];
+    if (last.close < lastHL.price) return NO_TRADE_BASE(symbol, 'marketstructure', candles, atrVal);
+    // Continuation BOS: close above most recent HH
+    const lastHH = recentHighs[recentHighs.length - 1];
+    if (last.close > lastHH.price) {
+      const consecutiveBull = recentHighs.filter((h) => h.label === 'HH').length + recentLows.filter((l) => l.label === 'HL').length;
+      let score = clampScore(55 + Math.min(consecutiveBull * 8, 30));
+      const entry = last.close;
+      const sl = entry - 1.5 * atrVal;
+      const tp = entry + 2.5 * atrVal;
+      return { symbol, strategy: 'marketstructure', direction: 'BUY', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+        reason: `Bullish market structure (HH+HL, ${consecutiveBull} consecutive). Continuation BOS above ${fmt(lastHH.price)}.`, time: last.time };
+    }
+  }
+
+  if (bearishStructure) {
+    const lastLH = recentHighs[recentHighs.length - 1];
+    if (last.close > lastLH.price) return NO_TRADE_BASE(symbol, 'marketstructure', candles, atrVal);
+    const lastLL = recentLows[recentLows.length - 1];
+    if (last.close < lastLL.price) {
+      const consecutiveBear = recentHighs.filter((h) => h.label === 'LH').length + recentLows.filter((l) => l.label === 'LL').length;
+      let score = clampScore(55 + Math.min(consecutiveBear * 8, 30));
+      const entry = last.close;
+      const sl = entry + 1.5 * atrVal;
+      const tp = entry - 2.5 * atrVal;
+      return { symbol, strategy: 'marketstructure', direction: 'SELL', score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+        reason: `Bearish market structure (LH+LL, ${consecutiveBear} consecutive). Continuation BOS below ${fmt(lastLL.price)}.`, time: last.time };
+    }
+  }
+
+  return NO_TRADE_BASE(symbol, 'marketstructure', candles, atrVal);
+};
+
+// ---- Quantitative Multi-Factor: weighted blend of normalized sub-scores ----
+export const quantMultiEngine: EngineFn = (symbol, candles) => {
+  const n = candles.length;
+  const last = candles[n - 1];
+  const atrArr = atr(candles, 14);
+  const atrVal = atrArr[n - 1] || (last.high - last.low);
+
+  if (n < 60) return NO_TRADE_BASE(symbol, 'quantmulti', candles, atrVal);
+
+  const c = closes(candles);
+  const e20 = ema(c, 20);
+  const e50 = ema(c, 50);
+  const e20Now = e20[n - 1];
+  const e50Now = e50[n - 1];
+
+  // 1. Trend alignment: EMA20 vs EMA50 spread strength (normalized 0-100)
+  const spread = (e20Now - e50Now) / Math.max(e50Now, 1e-9);
+  const trendRaw = 50 + Math.tanh(spread * 30) * 50; // -1..1 → 0..100
+  const trendScore = Math.max(0, Math.min(100, trendRaw));
+
+  // 2. Momentum: rate of change over 10 bars (normalized)
+  const roc = (c[n - 1] - c[n - 11]) / Math.max(c[n - 11], 1e-9);
+  const momentumScore = Math.max(0, Math.min(100, 50 + Math.tanh(roc * 25) * 50));
+
+  // 3. Volatility regime: current ATR percentile vs 60-bar history
+  const atrHistory = atrArr.slice(n - 60).filter((v) => !Number.isNaN(v));
+  const atrPercentile = atrHistory.length > 0
+    ? atrHistory.filter((v) => v <= atrVal).length / atrHistory.length * 100
+    : 50;
+  // Lower volatility regime = better for trending (inverse)
+  const volScore = Math.max(0, Math.min(100, 100 - atrPercentile));
+
+  // 4. Structure quality: count consecutive HH/HL or LH/LL
+  const swingHighs = findSwingHighs(candles);
+  const swingLows = findSwingLows(candles);
+  const labeled = classifySwings(swingHighs, swingLows);
+  const recentLabels = labeled.slice(-6);
+  let bullCount = 0, bearCount = 0;
+  for (const l of recentLabels) {
+    if (l.label === 'HH' || l.label === 'HL') bullCount++;
+    if (l.label === 'LH' || l.label === 'LL') bearCount++;
+  }
+  const structRaw = bullCount > bearCount ? 50 + (bullCount / recentLabels.length) * 50 : 50 - (bearCount / recentLabels.length) * 50;
+  const structScore = Math.max(0, Math.min(100, structRaw));
+
+  // 5. RR quality: distance to next key level / stop distance
+  const stopDist = atrVal * 1.5;
+  const rewardDist = atrVal * 2.5;
+  const rrRaw = rewardDist / Math.max(stopDist, 1e-9);
+  const rrScore = Math.max(0, Math.min(100, Math.min(rrRaw / 2, 1) * 100));
+
+  // Weighted blend
+  const blended = trendScore * 0.25 + momentumScore * 0.20 + volScore * 0.15 + structScore * 0.25 + rrScore * 0.15;
+
+  // Direction = majority sign of weighted sub-scores (above 50 = bullish)
+  const bullWeight = (trendScore > 50 ? 0.25 : 0) + (momentumScore > 50 ? 0.20 : 0) + (structScore > 50 ? 0.25 : 0) + (rrScore > 50 ? 0.15 : 0) + (volScore > 50 ? 0.15 : 0);
+  const bearWeight = (trendScore < 50 ? 0.25 : 0) + (momentumScore < 50 ? 0.20 : 0) + (structScore < 50 ? 0.25 : 0) + (rrScore < 50 ? 0.15 : 0) + (volScore < 50 ? 0.15 : 0);
+
+  if (blended < 50) return NO_TRADE_BASE(symbol, 'quantmulti', candles, atrVal);
+
+  const dir = bullWeight >= bearWeight ? 'BUY' : 'SELL';
+  const score = clampScore(blended);
+
+  const entry = last.close;
+  const sl = dir === 'BUY' ? entry - 1.5 * atrVal : entry + 1.5 * atrVal;
+  const tp = dir === 'BUY' ? entry + 2.5 * atrVal : entry - 2.5 * atrVal;
+
+  return {
+    symbol, strategy: 'quantmulti', direction: dir, score, entry, stopLoss: sl, takeProfit: tp, atr: atrVal,
+    reason: `Multi-factor blend ${score}/100 — trend ${trendScore.toFixed(0)} (${(0.25 * 100).toFixed(0)}%), momentum ${momentumScore.toFixed(0)} (${(0.20 * 100).toFixed(0)}%), vol regime ${volScore.toFixed(0)} (${(0.15 * 100).toFixed(0)}%), structure ${structScore.toFixed(0)} (${(0.25 * 100).toFixed(0)}%), RR ${rrScore.toFixed(0)} (${(0.15 * 100).toFixed(0)}%).`,
+    time: last.time,
+  };
+};
+
 export const ENGINES: Record<StrategyId, { fn: EngineFn; name: string; short: string }> = {
   trend: { fn: trendEngine, name: 'Trend Following', short: 'EMA20/EMA50' },
   breakout: { fn: breakoutEngine, name: 'Breakout + Retest', short: '20-bar high/low' },
@@ -494,6 +727,9 @@ export const ENGINES: Record<StrategyId, { fn: EngineFn; name: string; short: st
   orderflow: { fn: orderFlowEngine, name: 'Order Flow (Proxy)', short: 'CVD+VWAP proxy' },
   range: { fn: rangeEngine, name: 'Range Trading', short: '30-bar range' },
   momentum: { fn: momentumEngine, name: 'Momentum', short: 'Displacement' },
+  liquidity: { fn: liquidityEngine, name: 'Liquidity / SMC', short: 'SMC sweeps' },
+  marketstructure: { fn: marketStructureEngine, name: 'Market Structure', short: 'HH/HL structure' },
+  quantmulti: { fn: quantMultiEngine, name: 'Quantitative Multi-Factor', short: 'Multi-factor blend' },
 };
 
 export function runEngine(strategy: StrategyId, symbol: string, candles: Candle[]): Signal {

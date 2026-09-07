@@ -179,10 +179,12 @@ export function runBacktest(
     i = exitBar + 1;
   }
 
-  return summarize(trades, totalCosts);
+  return summarize(trades, totalCosts, candles);
 }
 
-function summarize(trades: BacktestTrade[], totalCosts = 0): BacktestResult {
+const RISK_PCT_PER_TRADE = 1; // matches the 1% used in position sizing above
+
+function summarize(trades: BacktestTrade[], totalCosts: number, candles: Candle[]): BacktestResult {
   const totalTrades = trades.length;
   const wins = trades.filter((t) => t.rMultiple > 0).length;
   const losses = trades.filter((t) => t.rMultiple <= 0).length;
@@ -201,7 +203,26 @@ function summarize(trades: BacktestTrade[], totalCosts = 0): BacktestResult {
     maxDd = Math.max(maxDd, peak - cum);
   }
 
-  return { totalTrades, wins, losses, winRate, profitFactor, expectancy, maxDrawdownR: maxDd, totalCosts, sharpe: computeSharpe(trades), sortino: computeSortino(trades), trades, equityCurve };
+  // Buy & hold: return from first to last close in the period
+  const firstClose = candles.length > 0 ? candles[0].close : 0;
+  const lastClose = candles.length > 0 ? candles[candles.length - 1].close : 0;
+  const buyHoldPct = firstClose > 0 ? ((lastClose - firstClose) / firstClose) * 100 : 0;
+  const buyHoldR = buyHoldPct / RISK_PCT_PER_TRADE;
+
+  // Strategy total % return = cumulative R × risk %
+  const totalR = equityCurve.length > 0 ? equityCurve[equityCurve.length - 1] : 0;
+  const strategyPct = totalR * RISK_PCT_PER_TRADE;
+
+  // Buy & hold equity curve normalized to R scale: convert each bar's cumulative % return to R
+  const buyHoldEquity: number[] = [];
+  if (candles.length > 1) {
+    for (let k = 0; k < candles.length; k++) {
+      const pct = ((candles[k].close - firstClose) / firstClose) * 100;
+      buyHoldEquity.push((pct / RISK_PCT_PER_TRADE) * (equityCurve.length > 0 ? equityCurve.length / candles.length : 1));
+    }
+  }
+
+  return { totalTrades, wins, losses, winRate, profitFactor, expectancy, maxDrawdownR: maxDd, totalCosts, sharpe: computeSharpe(trades), sortino: computeSortino(trades), buyHoldPct, buyHoldR, buyHoldEquity, strategyPct, trades, equityCurve };
 }
 
 function computeSharpe(trades: BacktestTrade[]): number | null {

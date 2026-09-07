@@ -105,6 +105,10 @@ export type BacktestResult = {
   totalCosts: number; // sum of spread+slippage+commission in $
   sharpe: number | null;
   sortino: number | null;
+  buyHoldPct: number; // buy-and-hold % return for the period
+  buyHoldR: number; // buy-and-hold in R terms
+  buyHoldEquity: number[]; // buy-and-hold equity curve normalized to strategy's R scale
+  strategyPct: number; // strategy total % return for the period
   trades: BacktestTrade[];
   equityCurve: number[]; // cumulative R per trade
 };

@@ -222,9 +222,9 @@ function WalkForwardResults({ symbol, strategy, result, source }: {
           <span className="text-xs text-slate-500">{STRATEGY_LABEL[strategy]} · {symbol}</span>
         </div>
         <div className="p-4 space-y-4">
-          <EquitySection title="Training" data={result.training.equityCurve} color="#6366f1" />
-          <EquitySection title="Validation" data={result.validation.equityCurve} color="#fbbf24" />
-          <EquitySection title="Out-of-Sample" data={result.outOfSample.equityCurve} color="#14b8a6" />
+          <EquitySection title="Training" data={result.training.equityCurve} buyHold={result.training.buyHoldEquity} color="#6366f1" />
+          <EquitySection title="Validation" data={result.validation.equityCurve} buyHold={result.validation.buyHoldEquity} color="#fbbf24" />
+          <EquitySection title="Out-of-Sample" data={result.outOfSample.equityCurve} buyHold={result.outOfSample.buyHoldEquity} color="#14b8a6" />
         </div>
       </div>
 
@@ -251,6 +251,12 @@ function PhaseResults({ phase, res, color }: { phase: string; res: BacktestResul
         <MetricRow label="Win Rate" value={res.totalTrades ? `${res.winRate.toFixed(1)}%` : '—'} tone={res.winRate >= 50 ? 'bull' : 'bear'} />
         <MetricRow label="Profit Factor" value={res.profitFactor.toFixed(2)} tone={res.profitFactor >= 1 ? 'bull' : 'bear'} />
         <MetricRow label="Expectancy" value={fmtR(res.expectancy)} tone={res.expectancy >= 0 ? 'bull' : 'bear'} />
+        <MetricRow label="Buy & Hold" value={`${res.buyHoldPct >= 0 ? '+' : ''}${res.buyHoldPct.toFixed(1)}%`} tone={res.strategyPct >= res.buyHoldPct ? 'bull' : 'bear'} />
+        <div className={`text-[10px] ${res.strategyPct >= res.buyHoldPct ? 'text-bull-400/80' : 'text-bear-400/80'}`}>
+          {res.strategyPct >= res.buyHoldPct
+            ? `Strategy beat buy-and-hold by ${(res.strategyPct - res.buyHoldPct).toFixed(1)}%`
+            : `Strategy underperformed buy-and-hold by ${(res.buyHoldPct - res.strategyPct).toFixed(1)}%`}
+        </div>
         <MetricRow label="Max DD (R)" value={res.maxDrawdownR.toFixed(2)} tone="bear" />
         <MetricRow label="Wins / Losses" value={`${res.wins} / ${res.losses}`} />
         <MetricRow label="Total Costs" value={`${res.totalCosts.toFixed(0)}`} tone="bear" />
@@ -297,15 +303,25 @@ function RobustnessCheck({ training, validation, oos }: { training: BacktestResu
   );
 }
 
-function EquitySection({ title, data, color }: { title: string; data: number[]; color: string }) {
+function EquitySection({ title, data, buyHold, color }: { title: string; data: number[]; buyHold: number[]; color: string }) {
+  const series = [{ values: data, color, width: 2 }];
+  if (buyHold.length > 1) series.push({ values: buyHold, color: '#64748b', width: 1.5, dashed: true });
   return (
     <div>
-      <div className="text-xs text-slate-400 mb-1.5 flex items-center gap-2">
-        <span className="w-3 h-0.5 rounded" style={{ backgroundColor: color }} />
-        {title}
+      <div className="text-xs text-slate-400 mb-1.5 flex items-center gap-4">
+        <span className="flex items-center gap-2">
+          <span className="w-3 h-0.5 rounded" style={{ backgroundColor: color }} />
+          {title} — Strategy
+        </span>
+        {buyHold.length > 1 && (
+          <span className="flex items-center gap-2">
+            <span className="w-3 h-0.5 rounded border-t border-dashed" style={{ borderColor: '#64748b' }} />
+            Buy & Hold
+          </span>
+        )}
       </div>
       {data.length > 0 ? (
-        <LineChart series={[{ values: data, color, width: 2 }]} showZeroLine height={140} />
+        <LineChart series={series} showZeroLine height={140} />
       ) : (
         <p className="text-xs text-slate-600 text-center py-8">No trades in this period.</p>
       )}
